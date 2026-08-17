@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Landing zone written by dlt. **At-least-once by design**: it may contain the
+      same event more than once, whether because upstream re-delivered it or because
+      the incremental cursor re-read its closed boundary. No uniqueness is asserted
+      here — asserting it would be a lie about what the layer is for.
+    schema: raw
+    tables:
+      - name: call_events
+        description: One row per delivered call attempt, exactly as it arrived.
+        columns:
+          - name: event_id
+            description: Deterministic event identifier. Not unique in this layer.
+          - name: occurred_at
+            description: Instant of the attempt, timezone-aware. Always UTC at source.
+          - name: buy_rate_eur_per_min
+            description: >
+              Purchase rate. **Nullable**, and the nulls are the point: the audit that
+              motivated this project found it missing on a fifth of billable calls.

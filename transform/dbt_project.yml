@@ -1,0 +1,19 @@
+name: carrier_iq
+version: 1.0.0
+profile: carrier_iq
+
+model-paths: ["models"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  carrier_iq:
+    staging:
+      # Staging stays a view: it is a rename-and-clean layer, and materialising it
+      # would double the storage for no gain at this scale.
+      +materialized: view
+    marts:
+      # Marts are tables: they are read repeatedly by analysts and by the model
+      # training step, so paying the write cost once is the right trade.
+      +materialized: table

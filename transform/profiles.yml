@@ -1,0 +1,12 @@
+# Checked in on purpose: there is no credential here. The warehouse is a local
+# DuckDB file, so the whole connection is a relative path. The day this moves to
+# Postgres (step 2) the password becomes an environment variable and never a literal
+# — see docs/adr/001.
+carrier_iq:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../warehouse.duckdb
+      schema: analytics
+      threads: 4

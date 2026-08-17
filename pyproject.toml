@@ -1,0 +1,50 @@
+[project]
+name = "carrier-iq"
+version = "0.1.0"
+description = "End-to-end data platform on synthetic telecom routing events: dlt ingestion, DuckDB warehouse, dbt star schema with tests as a merge gate."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Louay Mejri", email = "louay.mejri44@gmail.com" }]
+keywords = ["data-engineering", "dlt", "duckdb", "dbt", "dimensional-modeling", "data-quality"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "dlt[duckdb]>=1.6",
+    "duckdb>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+# dbt is a separate tool that happens to be installable with pip, not a dependency
+# of this package: nothing in `src/` imports it. Keeping it in its own extra means a
+# broken dbt dependency can never stop the ingestion tests from running.
+dbt = [
+    "dbt-duckdb>=1.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/4Lou4/carrier-iq"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/carrier_iq"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

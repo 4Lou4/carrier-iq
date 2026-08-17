@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install -e ".[dev,dbt]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Format check
+        run: ruff format --check src tests
+
+      - name: Unit and integration tests
+        run: pytest
+
+      # The pipeline runs end to end on every pull request. The volume is small on
+      # purpose: correctness does not depend on it, and a gate that takes four
+      # minutes is a gate people learn to skip.
+      - name: Extract and load
+        run: python -m carrier_iq.ingest --days 3 --events-per-day 4000
+
+      # THE MERGE GATE. `dbt build` runs the models and the 48 tests interleaved, so a
+      # data quality failure does not merely get reported — it stops the build before
+      # the bad rows reach the decision mart.
+      - name: Transform and test
+        working-directory: transform
+        run: dbt build --profiles-dir .
+
+      - name: Upload dbt run results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target
+          path: transform/target/
+          retention-days: 7

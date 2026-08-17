@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: stg_call_events
+    description: >
+      One row per call attempt, deduplicated, typed, and pinned to UTC. This is the
+      first layer where uniqueness holds, and the tests below are what prove it.
+    columns:
+      - name: event_id
+        description: Event identifier. Unique **here**, unlike in the source.
+        data_tests:
+          - unique
+          - not_null
+      - name: occurred_at_utc
+        description: Instant of the attempt, naive timestamp in UTC.
+        data_tests: [not_null]
+      - name: interval_start_utc
+        description: Start of the 15-minute bucket the attempt falls into, in UTC.
+        data_tests: [not_null]
+      - name: carrier_code
+        data_tests: [not_null]
+      - name: destination_code
+        data_tests: [not_null]
+      - name: origin_cc
+        description: Calling country code. Part of the decision key, because some
+          carriers price the same destination differently depending on it.
+        data_tests: [not_null]
+      - name: service_tier
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["economy", "standard", "premium", "critical"]
+      - name: disposition
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["answered", "no_answer", "busy", "failed", "congestion"]
+      - name: billable_seconds
+        data_tests: [not_null]
+      - name: sell_rate_eur_per_min
+        data_tests: [not_null]
+      - name: buy_rate_eur_per_min
+        description: Nullable on purpose. Its coverage is asserted by a singular test.
+      - name: margin_eur_per_min
+        description: Null wherever the purchase rate is missing. Never coalesced.

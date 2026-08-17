@@ -1,0 +1,101 @@
+version: 2
+
+models:
+  - name: dim_carrier
+    columns:
+      - name: carrier_key
+        data_tests: [unique, not_null]
+      - name: carrier_code
+        data_tests: [unique, not_null]
+
+  - name: dim_destination
+    columns:
+      - name: destination_key
+        data_tests: [unique, not_null]
+      - name: destination_code
+        data_tests: [unique, not_null]
+      - name: network_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["FIX", "MOB"]
+
+  - name: dim_service_tier
+    columns:
+      - name: service_tier_key
+        data_tests: [unique, not_null]
+      - name: service_tier
+        data_tests: [unique, not_null]
+      - name: tier_rank
+        description: 1 to 4. not_null is the real assertion here — a new tier added
+          upstream would fall through the CASE and surface as a null rather than
+          silently sorting first.
+        data_tests: [not_null]
+
+  - name: fct_call_attempt
+    description: "One row per call attempt. The grain everything else derives from."
+    columns:
+      - name: call_attempt_key
+        data_tests: [unique, not_null]
+      - name: carrier_key
+        description: Referential integrity is proven, not assumed — the keys are
+          hashes computed on both sides rather than joined, so this test is what
+          guarantees the star actually closes.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_carrier')
+                field: carrier_key
+      - name: destination_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_destination')
+                field: destination_key
+      - name: service_tier_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service_tier')
+                field: service_tier_key
+      - name: interval_start_utc
+        data_tests: [not_null]
+
+  - name: agg_routing_interval
+    description: >
+      The decision mart: 15 min x carrier x destination x origin x tier. Its grain is
+      asserted by a singular test rather than a column test, because uniqueness here
+      is a property of five columns together.
+    columns:
+      - name: interval_start_utc
+        data_tests: [not_null]
+      - name: attempts
+        data_tests: [not_null]
+      - name: answer_rate
+        data_tests: [not_null]
+      - name: human_answer_rate
+        data_tests: [not_null]
+      - name: buy_rate_coverage
+        data_tests: [not_null]
+
+  - name: dq_interval_density
+    description: >
+      One row describing how thin the decision mart is. Published as a model rather
+      than left as an ad-hoc query, because a warehouse that serves rates without
+      serving their reliability lets a consumer read a rate computed on two attempts
+      as if it were computed on four hundred.
+    columns:
+      - name: slots
+        data_tests: [not_null]
+      - name: mean_attempts_per_slot
+        data_tests: [not_null]
+      - name: median_attempts_per_slot
+        data_tests: [not_null]
+      - name: share_at_or_above_30
+        description: Share of slots holding at least thirty attempts. Deliberately not
+          gated — thin slots are the domain, not a defect.
+        data_tests: [not_null]
