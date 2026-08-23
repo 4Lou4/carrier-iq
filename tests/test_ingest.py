@@ -108,8 +108,7 @@ def test_malformed_deliveries_reach_the_raw_layer(warehouse):
     rows = _scalar(wh, "select count(*) from raw.call_events")
     unreadable = _scalar(
         wh,
-        "select count(*) from raw.call_events "
-        "where event_id is null or billable_seconds < 0",
+        "select count(*) from raw.call_events where event_id is null or billable_seconds < 0",
     )
     assert unreadable > 0
     assert 0.15 < unreadable / rows < 0.35
