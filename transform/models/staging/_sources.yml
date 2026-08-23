@@ -11,6 +11,26 @@ sources:
     tables:
       - name: call_events
         description: One row per delivered call attempt, exactly as it arrived.
+        # Freshness SLO.
+        #
+        # Read what this actually measures before quoting it. loaded_at_field is
+        # occurred_at, which is when the call happened — not when the row was
+        # written. So this watches **event freshness**: how far behind reality the
+        # warehouse is, end to end. A stalled generator, a stalled ingestion and a
+        # stalled load all show up here, because all three stop new events arriving.
+        #
+        # What it cannot see is a load that succeeds while replaying old events: the
+        # rows are fresh, the events are not, and this SLO stays green. Watching
+        # _dlt_load_id timestamps instead would catch that and miss the first three.
+        # Event freshness is the right choice for a pipeline whose job is to inform a
+        # decision every fifteen minutes, but it is a choice, and the two are worth
+        # being able to tell apart out loud.
+        loaded_at_field: occurred_at
+        freshness:
+          # Two intervals, not one, and the gap between them is the point: the warning
+          # is a signal to look, the error is a signal to stop.
+          warn_after: { count: 2, period: hour }
+          error_after: { count: 6, period: hour }
         columns:
           - name: event_id
             description: Deterministic event identifier. Not unique in this layer.

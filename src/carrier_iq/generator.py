@@ -11,10 +11,20 @@ destinations almost all the volume. A generator that spread traffic evenly would
 make every downstream aggregate look well-behaved and would prove nothing about the
 pipeline.
 
-**Injected defects.** A fraction of events carry no purchase rate, and a fraction
-are emitted twice under the same ``event_id``. These are not bugs — they are the two
-defects the dbt tests have to catch, and the reason those tests are a merge gate
-rather than a dashboard. A test that cannot fail proves nothing.
+**Injected defects.** A fraction of events carry no purchase rate, a fraction are
+emitted twice under the same ``event_id``, and a small fraction arrive malformed.
+These are not bugs — they are the defects the dbt tests have to catch, and the reason
+those tests are a merge gate rather than a dashboard. A test that cannot fail proves
+nothing, and neither does a quarantine that never holds anything.
+
+The third defect is a different kind from the first two, and the difference is the
+whole reason the quarantine exists. A missing purchase rate is **incomplete but
+readable**: the row still describes a call that happened, so it flows through and its
+coverage is watched by a gate. A malformed row is **unreadable**: no identifier, a
+negative duration, an instant that has not happened yet. Nothing downstream can say
+anything true about it. Letting it through would corrupt an aggregate; failing the
+whole load on it would let one bad delivery stop a pipeline that is otherwise fine.
+So it is set aside, counted, and its volume is itself under test.
 
 **Stream stability.** Only ``random.Random.random()`` is used and every other
 quantity is derived from it. A fixture whose values move when a dependency is
@@ -109,6 +119,10 @@ class GeneratorConfig:
     missing_buy_rate_share: float = 0.08
     #: Share of events re-emitted verbatim, as a duplicated delivery would do.
     duplicate_share: float = 0.004
+    #: Share of deliveries that arrive corrupted and cannot be read at all. Small on
+    #: purpose: a quarantine is meant to catch a trickle. If this share ever rises,
+    #: the volume test in transform/tests/ is what says so out loud.
+    malformed_share: float = 0.002
     seed: int = 20260817
 
 
@@ -249,6 +263,45 @@ def build_catalogue(config: GeneratorConfig | None = None) -> RoutingCatalogue:
     )
 
 
+def _corrupt(event: dict, u: float) -> dict:
+    """Return ``event`` as a delivery that arrived damaged.
+
+    Two corruptions, chosen by ``u``. Each removes the ability to say something true
+    about the row, which is what separates a quarantine case from the merely
+    incomplete rows the coverage gate watches:
+
+    * no ``event_id`` — the row cannot be deduplicated, so it cannot be counted once
+    * a negative billable duration — no aggregate over it means anything
+
+    The corrupted delivery replaces the clean one rather than being emitted beside
+    it. That is what a damaged delivery is: the good version never arrived.
+
+    A third corruption is deliberately not injected here, and the reason is worth
+    knowing rather than hiding
+    -------------------------------------------------------------------------------
+    An event dated in the future is a real defect — upstream clock skew produces it —
+    and :func:`quarantine_reason` does check for it. But it cannot be injected at
+    this layer, because **it would break the loader before the quarantine ever saw
+    it**. Loading is incremental on ``occurred_at``: dlt keeps the maximum value it
+    has seen as a high-water mark. One row dated 2036 moves that mark to 2036, and
+    every later run then asks for events at or after 2036 and finds none. The pipeline
+    reports success and loads nothing, indefinitely.
+
+    That is the failure mode worth naming: a validation placed after the cursor cannot
+    protect the cursor. Fixing it properly means validating before the high-water mark
+    advances, which belongs with the orchestrator rather than in the generator, so it
+    is recorded in ADR-002 and handled when the DAG lands. The check stays in the
+    macro in the meantime, so that a future-dated row arriving by any other path is
+    still held back rather than counted.
+    """
+    damaged = dict(event)
+    if u < 0.5:
+        damaged["event_id"] = None
+    else:
+        damaged["billable_seconds"] = -damaged["billable_seconds"] - 1
+    return damaged
+
+
 def generate_day(day: date, config: GeneratorConfig | None = None) -> Iterator[dict]:
     """Yield one day of synthetic call attempts.
 
@@ -326,6 +379,13 @@ def generate_day(day: date, config: GeneratorConfig | None = None) -> Iterator[d
             "sell_rate_eur_per_min": sell_rate,
             "buy_rate_eur_per_min": buy_rate,
         }
+        # A damaged delivery replaces the clean one, and is never duplicated: two
+        # copies of an unreadable row would only make the quarantine noisier without
+        # testing anything the single copy does not already test.
+        if rng.random() < cfg.malformed_share:
+            yield _corrupt(event, rng.random())
+            continue
+
         yield event
 
         # A duplicated delivery: the same event, emitted twice. Staging has to

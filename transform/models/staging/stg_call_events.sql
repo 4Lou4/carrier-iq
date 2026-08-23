@@ -5,7 +5,18 @@
 -- event_id in _staging.yml is therefore not decoration: it is the assertion that
 -- this deduplication still works, and it fails the build if it stops.
 
-with deduplicated as (
+with admissible as (
+
+    -- Unreadable deliveries are held back by stg_call_events_quarantine, using the
+    -- same macro. They are excluded here rather than downstream so that the row
+    -- numbering below never has to rank a row it cannot order.
+    select *
+    from {{ source('raw', 'call_events') }}
+    where {{ quarantine_reason() }} is null
+
+),
+
+deduplicated as (
 
     select
         *,
@@ -17,7 +28,7 @@ with deduplicated as (
             order by _dlt_load_id, _dlt_id
         ) as _row_in_event
 
-    from {{ source('raw', 'call_events') }}
+    from admissible
 
 )
 

@@ -45,3 +45,28 @@ models:
         description: Nullable on purpose. Its coverage is asserted by a singular test.
       - name: margin_eur_per_min
         description: Null wherever the purchase rate is missing. Never coalesced.
+
+  - name: stg_call_events_quarantine
+    description: >
+      Deliveries that arrived unreadable, kept rather than dropped, each labelled with
+      the reason it was rejected. This is the dead letter queue: it is what stops one
+      damaged row from failing a whole load, and what stops the same row from
+      corrupting an aggregate. Its **volume** is asserted by a singular test, because
+      a queue that grows silently turns a loud upstream failure into a quiet
+      undercount.
+    columns:
+      - name: quarantine_reason
+        description: Why the row could not be read. Defined once, in the
+          quarantine_reason macro, and shared with stg_call_events.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - missing_event_id
+                  - negative_billable_seconds
+                  - occurred_in_the_future
+      - name: _dlt_load_id
+        description: The load that carried the rejected delivery, kept so it can be
+          traced back rather than merely counted.
+        data_tests: [not_null]

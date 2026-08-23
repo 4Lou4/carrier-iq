@@ -23,7 +23,15 @@ DAY = date(2026, 3, 2)
 
 @pytest.fixture
 def small():
-    return GeneratorConfig(events_per_day=2_000)
+    """Clean events only.
+
+    Malformed deliveries are switched off here on purpose: every test below pins an
+    invariant of a *readable* event, and a malformed row is precisely a row that
+    breaks those invariants. Leaving the injection on would make each of them assert
+    "this holds, except when it does not", which is not an invariant. The malformed
+    path has its own tests at the bottom of this file.
+    """
+    return GeneratorConfig(events_per_day=2_000, malformed_share=0.0)
 
 
 @pytest.fixture
@@ -134,3 +142,45 @@ def test_timestamps_stay_inside_their_day(events):
 def test_generate_days_rejects_a_non_positive_range(small):
     with pytest.raises(ValueError, match="n_days"):
         list(generate_days(DAY, 0, small))
+
+
+# --- the malformed path: what the quarantine downstream has to catch ---
+
+
+@pytest.fixture
+def with_malformed():
+    """A high injection rate, so the assertions below are not luck at 0.2%."""
+    return GeneratorConfig(events_per_day=2_000, malformed_share=0.25)
+
+
+def _is_malformed(event: dict) -> bool:
+    return event["event_id"] is None or event["billable_seconds"] < 0
+
+
+def test_malformed_deliveries_are_injected(with_malformed):
+    events = list(generate_day(DAY, with_malformed))
+    malformed = [e for e in events if _is_malformed(e)]
+    assert malformed, "the quarantine downstream would have nothing to catch"
+    assert 0.15 < len(malformed) / len(events) < 0.35
+
+
+def test_both_corruptions_occur(with_malformed):
+    events = list(generate_day(DAY, with_malformed))
+    assert any(e["event_id"] is None for e in events)
+    assert any(e["billable_seconds"] < 0 for e in events)
+
+
+def test_no_malformed_delivery_when_the_share_is_zero(small):
+    assert not any(_is_malformed(e) for e in generate_day(DAY, small))
+
+
+def test_no_event_is_dated_in_the_future(with_malformed):
+    """The corruption that is deliberately absent, pinned so it stays absent.
+
+    A future-dated event would move the dlt high-water mark past every real event and
+    silently stop the pipeline loading anything again. See _corrupt: the check lives
+    in the quarantine macro, but the defect must not be injected upstream of the
+    cursor. This test is what stops someone adding it back without reading why.
+    """
+    latest = max(e["occurred_at"] for e in generate_day(DAY, with_malformed))
+    assert latest.date() == DAY

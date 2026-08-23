@@ -18,7 +18,13 @@ START = date(2026, 3, 1)
 
 @pytest.fixture
 def small():
-    return GeneratorConfig(events_per_day=800)
+    """Clean events only: these tests count distinct event_id, which ignores nulls.
+
+    A malformed delivery carries no identifier, so leaving the injection on would make
+    every count below short by an amount that varies run to run. The malformed path is
+    tested separately, where the count is deliberately taken on rows rather than ids.
+    """
+    return GeneratorConfig(events_per_day=800, malformed_share=0.0)
 
 
 @pytest.fixture
@@ -87,3 +93,23 @@ def test_days_are_bucketed_in_utc_not_in_local_time(warehouse, small):
         wh, "select count(distinct (occurred_at at time zone 'UTC')::date) from raw.call_events"
     )
     assert utc_days == 3
+
+
+def test_malformed_deliveries_reach_the_raw_layer(warehouse):
+    """Raw is a faithful record, so unreadable rows land here rather than being lost.
+
+    This is what makes the quarantine model possible at all: if the loader dropped
+    them, there would be nothing to hold back and nothing to count.
+    """
+    config = GeneratorConfig(events_per_day=800, malformed_share=0.25)
+    load(START, 1, config=config, **warehouse)
+    wh = warehouse["warehouse"]
+
+    rows = _scalar(wh, "select count(*) from raw.call_events")
+    unreadable = _scalar(
+        wh,
+        "select count(*) from raw.call_events "
+        "where event_id is null or billable_seconds < 0",
+    )
+    assert unreadable > 0
+    assert 0.15 < unreadable / rows < 0.35
