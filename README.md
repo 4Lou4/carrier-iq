@@ -161,6 +161,20 @@ cd transform
 dbt build --profiles-dir . --target postgres
 ```
 
+### With the orchestrator
+
+```bash
+docker compose --profile airflow up -d   # scheduler + interface, ~1 GB of RAM
+# http://localhost:8080
+
+# A backfill is a normal operation here, not a rescue: every task reads the logical
+# date Airflow injects, never now(), so re-running a past day reproduces that day.
+docker compose exec airflow-scheduler   airflow dags backfill carrier_iq_daily -s 2026-03-01 -e 2026-03-03
+```
+
+It sits behind a compose profile, so `docker compose up -d` still starts the warehouse
+alone. Most of the time that is all you need.
+
 Both warehouses produce the same numbers, and that was verified by comparing them
 rather than by both builds going green: same slot count, same attempt count, same mean
 answer rate to six decimals, same first and last bucket. See ADR-003 — the `date_bin`

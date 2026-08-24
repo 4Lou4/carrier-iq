@@ -23,6 +23,8 @@ services:
       - "${POSTGRES_PORT:-55432}:5432"
     volumes:
       - warehouse_data:/var/lib/postgresql/data
+      # Creates the `airflow` metadata database on a fresh volume. See the file.
+      - ./orchestration/init-airflow-db.sql:/docker-entrypoint-initdb.d/10-airflow.sql:ro
     healthcheck:
       # Nothing should connect before the server accepts connections. Without this,
       # a dbt run started too early fails with a confusing "connection refused"
@@ -32,5 +34,78 @@ services:
       timeout: 3s
       retries: 20
 
+  # ---------------------------------------------------------------------------
+  # The orchestrator. Two services, because Airflow separates the thing that
+  # decides what to run from the thing that serves the interface, and only the
+  # first one matters for correctness.
+  #
+  #   docker compose --profile airflow up -d
+  #   open http://localhost:8080
+  #
+  # It is behind a profile so `docker compose up -d` still starts the warehouse
+  # alone. Most of the time that is all you need, and Airflow costs ~1 GB of RAM.
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    profiles: ["airflow"]
+    build:
+      context: .
+      dockerfile: orchestration/Dockerfile
+    image: carrier-iq-airflow:local
+    container_name: carrier_iq_airflow_init
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    environment: &airflow_env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+        postgresql+psycopg2://${POSTGRES_USER:-carrier_iq}:${POSTGRES_PASSWORD}@warehouse:5432/airflow
+      # Local development only. It removes the login screen on a container that
+      # listens on localhost and holds synthetic data. Never do this anywhere a
+      # network can reach.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      # What the DAG hands to dlt and dbt. Inside the compose network the warehouse
+      # answers on its service name and port 5432 — the 55432 mapping is only for
+      # the host.
+      POSTGRES_HOST: warehouse
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-carrier_iq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-carrier_iq}
+    volumes: &airflow_volumes
+      - ./orchestration/dags:/opt/airflow/dags:ro
+      - ./transform:/opt/carrier-iq/transform:ro
+      - airflow_logs:/opt/airflow/logs
+    command: >-
+      bash -c "airflow db migrate && echo 'metadata database ready'"
+
+  airflow-scheduler:
+    profiles: ["airflow"]
+    image: carrier-iq-airflow:local
+    container_name: carrier_iq_airflow_scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_env
+    volumes: *airflow_volumes
+    command: scheduler
+    restart: unless-stopped
+
+  airflow-apiserver:
+    profiles: ["airflow"]
+    image: carrier-iq-airflow:local
+    container_name: carrier_iq_airflow_apiserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow_env
+    volumes: *airflow_volumes
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    command: api-server
+    restart: unless-stopped
+
 volumes:
   warehouse_data:
+  airflow_logs:
