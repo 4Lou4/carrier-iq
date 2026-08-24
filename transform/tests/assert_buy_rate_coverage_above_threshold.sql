@@ -18,7 +18,7 @@ with coverage as (
     select
         count(*) as attempts,
         count(*) filter (where has_buy_rate) as with_buy_rate,
-        count(*) filter (where has_buy_rate) / count(*)::double as coverage
+        count(*) filter (where has_buy_rate) / count(*)::{{ dbt.type_float() }} as coverage
     from {{ ref('fct_call_attempt') }}
 
 )

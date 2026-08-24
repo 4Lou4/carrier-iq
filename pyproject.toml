@@ -27,6 +27,12 @@ dev = [
 dbt = [
     "dbt-duckdb>=1.9",
 ]
+# The step-2 warehouse. Kept in its own extra so a machine without Docker can still
+# install the project and run the whole DuckDB path.
+postgres = [
+    "dbt-postgres>=1.9",
+    "psycopg2-binary>=2.9",
+]
 
 [project.urls]
 Homepage = "https://github.com/4Lou4/carrier-iq"

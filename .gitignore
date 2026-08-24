@@ -28,6 +28,9 @@ transform/logs/
 # Never, under any circumstance
 .env
 .env.*
+# ...but the template must be committed: it is what tells the next person
+# which variables exist. It carries dummy values only.
+!.env.example
 *.key
 *.pem
 data/

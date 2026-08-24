@@ -1,0 +1,36 @@
+# The warehouse for step 2, and nothing else.
+#
+# DuckDB stays the default target: it needs no server, CI installs it in seconds, and
+# every test in this repository still runs without Docker. This file exists because
+# ADR-001 named the trigger that brings Postgres in — concurrent writes, which arrive
+# with the orchestrator — and ADR-003 records the migration itself.
+#
+#   docker compose up -d        start it
+#   docker compose down         stop it, keep the data
+#   docker compose down -v      stop it and delete the data
+
+services:
+  warehouse:
+    image: postgres:17-alpine
+    container_name: carrier_iq_warehouse
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-carrier_iq}
+      POSTGRES_USER: ${POSTGRES_USER:-carrier_iq}
+      # No default. A warehouse that starts with a password baked into a file checked
+      # into git is how credentials leak; the compose file refuses to start instead.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env, see .env.example}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - warehouse_data:/var/lib/postgresql/data
+    healthcheck:
+      # Nothing should connect before the server accepts connections. Without this,
+      # a dbt run started too early fails with a confusing "connection refused"
+      # rather than waiting.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-carrier_iq} -d ${POSTGRES_DB:-carrier_iq}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  warehouse_data:

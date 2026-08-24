@@ -1,12 +1,30 @@
-# Checked in on purpose: there is no credential here. The warehouse is a local
-# DuckDB file, so the whole connection is a relative path. The day this moves to
-# Postgres (step 2) the password becomes an environment variable and never a literal
-# — see docs/adr/001.
+# Two targets, one project.
+#
+# `dev` is DuckDB and stays the default: it needs no server, CI installs it in
+# seconds, and every model and test in this repository still runs without Docker.
+# `postgres` is the step-2 warehouse, brought in by the trigger ADR-001 named.
+#
+# No credential is written here. The DuckDB path is relative, and every Postgres
+# field reads an environment variable — see .env.example. A password literal in a
+# checked-in file is how credentials leak, and this file is public.
 carrier_iq:
   target: dev
   outputs:
     dev:
       type: duckdb
       path: ../warehouse.duckdb
+      schema: analytics
+      threads: 4
+
+    postgres:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      # The container publishes 55432, not 5432: a locally installed Postgres would
+      # take 5432, and the collision looks like a credentials error rather than a
+      # port clash.
+      port: "{{ env_var('POSTGRES_PORT', '55432') | int }}"
+      user: "{{ env_var('POSTGRES_USER', 'carrier_iq') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'carrier_iq') }}"
       schema: analytics
       threads: 4

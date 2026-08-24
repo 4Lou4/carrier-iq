@@ -44,7 +44,7 @@ select
     -- The decision grain. Fifteen minutes is short enough to catch a degradation
     -- while it still matters, and long enough that the counters keep a statistical
     -- meaning on low-traffic destinations.
-    time_bucket(interval '15 minutes', occurred_at at time zone 'UTC') as interval_start_utc,
+    {{ interval_bucket("occurred_at at time zone 'UTC'", 15) }} as interval_start_utc,
 
     carrier_code,
     destination_code,

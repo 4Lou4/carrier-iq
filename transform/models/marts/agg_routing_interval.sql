@@ -31,8 +31,8 @@ select
     -- what is true. The gap between them is itself the fraud signal, so collapsing
     -- them into a single "quality" column would destroy the only measure that
     -- distinguishes a good route from a route that merely reports well.
-    count(*) filter (where is_answered) / count(*)::double as answer_rate,
-    count(*) filter (where is_human_answered) / count(*)::double as human_answer_rate,
+    count(*) filter (where is_answered) / count(*)::{{ dbt.type_float() }} as answer_rate,
+    count(*) filter (where is_human_answered) / count(*)::{{ dbt.type_float() }} as human_answer_rate,
 
     sum(billable_seconds) as billable_seconds,
     sum(billable_minutes) as billable_minutes,
@@ -45,7 +45,7 @@ select
     -- coverage is how an unreliable number gets treated as a reliable one.
     sum(billable_minutes * buy_rate_eur_per_min) filter (where has_buy_rate) as cost_eur,
     sum(billable_minutes * margin_eur_per_min) filter (where has_buy_rate) as margin_eur,
-    count(*) filter (where has_buy_rate) / count(*)::double as buy_rate_coverage
+    count(*) filter (where has_buy_rate) / count(*)::{{ dbt.type_float() }} as buy_rate_coverage
 
 from {{ ref('fct_call_attempt') }} f
 inner join {{ ref('dim_carrier') }} c using (carrier_key)

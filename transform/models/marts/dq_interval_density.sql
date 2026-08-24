@@ -21,7 +21,12 @@ select
     count(*) as slots,
     sum(attempts) as attempts,
 
-    round(avg(attempts), 2) as mean_attempts_per_slot,
+    -- round() is cast to numeric first, and that is not decoration. Postgres only
+    -- defines round(numeric, int); it has no round(double precision, int), while
+    -- DuckDB accepts both. Without the cast this model compiles on one warehouse and
+    -- fails on the other — which is exactly the class of bug portable SQL is meant to
+    -- prevent, and the third one this migration surfaced.
+    round((avg(attempts))::numeric, 2) as mean_attempts_per_slot,
     -- Standard ordered-set aggregate rather than DuckDB's median(), for the same
     -- reason the marts use `filter`: step 2 moves this to Postgres.
     percentile_cont(0.5) within group (order by attempts) as median_attempts_per_slot,
@@ -32,9 +37,9 @@ select
     -- estimator is tuned to. Reporting the share above it says, in one number, how
     -- much of this mart can be read directly and how much needs shrinking first.
     count(*) filter (where attempts >= 30) as slots_at_or_above_30,
-    round(count(*) filter (where attempts >= 30) / count(*)::double, 4) as share_at_or_above_30,
+    round((count(*) filter (where attempts >= 30) / count(*)::{{ dbt.type_float() }})::numeric, 4) as share_at_or_above_30,
 
-    round(avg(buy_rate_coverage), 4) as mean_buy_rate_coverage,
+    round((avg(buy_rate_coverage))::numeric, 4) as mean_buy_rate_coverage,
     min(interval_start_utc) as first_interval_utc,
     max(interval_start_utc) as last_interval_utc
 

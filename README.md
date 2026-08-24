@@ -143,8 +143,28 @@ uv pip install -e ".[dev,dbt]"
 pytest                                  # 26 tests, including a real dlt → DuckDB run
 python -m carrier_iq.ingest             # generator → dlt → DuckDB, ~2 min for a week
 cd transform
-dbt build --profiles-dir .              # 7 models + ~50 tests, red on any defect
+dbt build --profiles-dir .              # 8 models + ~57 tests, red on any defect
 ```
+
+### On PostgreSQL instead
+
+DuckDB is the default and needs nothing running. Postgres is the step-2 warehouse,
+brought in by the trigger ADR-001 named — an orchestrator runs tasks in parallel, and
+DuckDB takes a single writer lock on its file.
+
+```bash
+cp .env.example .env                    # then change the password
+docker compose up -d                    # Postgres on port 55432, not 5432
+
+python -m carrier_iq.ingest --destination postgres
+cd transform
+dbt build --profiles-dir . --target postgres
+```
+
+Both warehouses produce the same numbers, and that was verified by comparing them
+rather than by both builds going green: same slot count, same attempt count, same mean
+answer rate to six decimals, same first and last bucket. See ADR-003 — the `date_bin`
+origin is the place where this could have gone quietly wrong.
 
 To watch the quality gate do its job, load a degraded window and rebuild:
 

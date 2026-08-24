@@ -38,6 +38,7 @@ limit is what step 3 of this project is for.
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import date
 
 import dlt
@@ -73,13 +74,56 @@ def call_events(
     yield from generate_days(start, n_days, config)
 
 
-def build_pipeline(warehouse: str = WAREHOUSE, pipelines_dir: str | None = None) -> dlt.Pipeline:
+def _postgres_destination():
+    """The step-2 warehouse, addressed entirely through environment variables.
+
+    Nothing here has a default password. If ``POSTGRES_PASSWORD`` is unset the call
+    fails immediately with a readable message, rather than falling back to something
+    that happens to work on one machine and nowhere else.
+    """
+    missing = [k for k in ("POSTGRES_PASSWORD",) if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(
+            f"{', '.join(missing)} is not set. Copy .env.example to .env and start the "
+            "warehouse with `docker compose up -d`."
+        )
+    return dlt.destinations.postgres(
+        "postgresql://{user}:{password}@{host}:{port}/{db}".format(
+            user=os.environ.get("POSTGRES_USER", "carrier_iq"),
+            password=os.environ["POSTGRES_PASSWORD"],
+            host=os.environ.get("POSTGRES_HOST", "localhost"),
+            port=os.environ.get("POSTGRES_PORT", "55432"),
+            db=os.environ.get("POSTGRES_DB", "carrier_iq"),
+        )
+    )
+
+
+def build_pipeline(
+    warehouse: str = WAREHOUSE,
+    pipelines_dir: str | None = None,
+    destination: str = "duckdb",
+) -> dlt.Pipeline:
     """Build the pipeline.
 
     ``pipelines_dir`` exists so a test can get its own incremental state. dlt keeps
     the high-water mark on disk keyed by pipeline name, so without it two tests
     would silently share a cursor and the second one would load nothing.
+
+    ``destination`` selects the warehouse. DuckDB stays the default: it needs no
+    server, so the whole test suite and the whole CI run without Docker. Postgres is
+    the step-2 target, and the pipeline name changes with it — dlt keys its
+    high-water mark by pipeline name, so sharing one name across two warehouses would
+    let a DuckDB run convince a Postgres run that it had already loaded everything.
     """
+    if destination == "postgres":
+        return dlt.pipeline(
+            pipeline_name="carrier_iq_postgres",
+            destination=_postgres_destination(),
+            dataset_name=DATASET,
+            pipelines_dir=pipelines_dir,
+        )
+    if destination != "duckdb":
+        raise ValueError(f"unknown destination {destination!r}; expected duckdb or postgres")
     return dlt.pipeline(
         pipeline_name="carrier_iq",
         destination=dlt.destinations.duckdb(warehouse),
@@ -94,16 +138,23 @@ def load(
     warehouse: str = WAREHOUSE,
     config: GeneratorConfig | None = None,
     pipelines_dir: str | None = None,
+    destination: str = "duckdb",
 ):
-    pipeline = build_pipeline(warehouse, pipelines_dir)
+    pipeline = build_pipeline(warehouse, pipelines_dir, destination)
     return pipeline.run(call_events(start=start, n_days=n_days, config=config))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Load synthetic call events into DuckDB.")
+    parser = argparse.ArgumentParser(description="Load synthetic call events.")
     parser.add_argument("--start", type=date.fromisoformat, default=DEFAULT_START)
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS)
     parser.add_argument("--warehouse", default=WAREHOUSE)
+    parser.add_argument(
+        "--destination",
+        choices=("duckdb", "postgres"),
+        default="duckdb",
+        help="Where to load. DuckDB needs nothing running; postgres needs the container up.",
+    )
     parser.add_argument(
         "--events-per-day",
         type=int,
@@ -121,7 +172,13 @@ def main() -> None:
         if args.events_per_day is not None
         else None
     )
-    info = load(start=args.start, n_days=args.days, warehouse=args.warehouse, config=config)
+    info = load(
+        start=args.start,
+        n_days=args.days,
+        warehouse=args.warehouse,
+        config=config,
+        destination=args.destination,
+    )
     print(info)
 
 

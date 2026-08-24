@@ -29,7 +29,7 @@ share as (
     select
         quarantined,
         delivered,
-        quarantined / nullif(delivered, 0)::double as quarantined_share
+        quarantined / nullif(delivered, 0)::{{ dbt.type_float() }} as quarantined_share
     from volumes
 
 )
